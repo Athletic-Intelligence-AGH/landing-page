@@ -1,0 +1,71 @@
+stages:
+  - build
+  - deploy
+
+workflow:
+  rules:
+    - if: $CI_COMMIT_MESSAGE =~ /^.*nobuild/
+      when: never
+    - if: $CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS
+      when: never
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      when: never
+    - when: always
+
+variables:
+  APP_PATH: '/srv/sknai/app'
+  APP_USER: sknai
+  CURRENT_UID: 0
+#   SRV_ENV: "SRV_ENV=$CI_COMMIT_BRANCH"
+
+# Budowanie obrazu
+build-job:
+  image: docker:dind
+  stage: build
+  only:
+    - production
+  tags:
+    - no-fips
+  variables:
+    DOCKER_IMAGE_NAME: $CI_REGISTRY_IMAGE/licencje-$CI_COMMIT_BRANCH:$CI_COMMIT_SHORT_SHA
+  before_script:
+    - docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" $CI_REGISTRY
+  script:
+    - echo "Starting build job..."
+    - docker build --pull -t "$DOCKER_IMAGE_NAME" .
+    - docker push "$DOCKER_IMAGE_NAME"
+    - docker tag "$DOCKER_IMAGE_NAME" "$CI_REGISTRY_IMAGE/licencje-$CI_COMMIT_BRANCH:latest"
+    - docker push "$CI_REGISTRY_IMAGE/licencje-$CI_COMMIT_BRANCH:latest"
+    - echo "Build complete."
+
+deploy-job-prod:
+  image: alpine:3.23.2
+  stage: deploy
+  environment:
+    name: production
+    url: https://aisport.skn.agh.edu.pl
+  only: [production]
+  when: manual
+  tags:
+    - no-fips
+  before_script:
+    - echo "Deploying application..."
+    - apk add --no-cache openssh rsync
+    - eval $(ssh-agent -s)
+    - echo "$SSH_KEY_PROD" | base64 -d | tr -d '\r' | ssh-add -
+    - mkdir -p ~/.ssh
+    - '[[ -f /.dockerenv ]] && echo -e "Host *\n\tStrictHostKeyChecking no\n\n" > ~/.ssh/config'
+  script:
+    - rsync docker-compose.yml $APP_USER@$IP_PROD:$APP_PATH/docker-compose.yml
+    - ssh $APP_USER@$IP_PROD "echo $SKNAI_AT | docker login gitlab.dev.cri.agh.edu.pl:5050 -u skn-ai --password-stdin"
+    - ssh $APP_USER@$IP_PROD "cd $APP_PATH; docker compose pull"
+    - >
+      ssh $APP_USER@$IP_PROD
+      "sudo systemctl stop docker-compose@skn-ai.service &&
+      sudo systemctl start docker-compose@skn-ai.service &&
+      sudo systemctl status docker-compose@skn-ai.service"
+    - echo "Application successfully deployed."
+  after_script:
+    - >
+      ssh $APP_USER@$IP_PROD
+      "cd $APP_PATH; docker compose logs"
