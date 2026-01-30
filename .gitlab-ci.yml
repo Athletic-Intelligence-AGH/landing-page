@@ -61,9 +61,9 @@ deploy-job-prod:
     - ssh $APP_USER@$IP_PROD "cd $APP_PATH; docker compose pull"
     - >
       ssh $APP_USER@$IP_PROD
-      "sudo systemctl stop docker-compose@skn-ai.service &&
-      sudo systemctl start docker-compose@skn-ai.service &&
-      sudo systemctl status docker-compose@skn-ai.service"
+      "sudo systemctl stop docker-compose@sknai.service &&
+      sudo systemctl start docker-compose@sknai.service &&
+      sudo systemctl status docker-compose@sknai.service"
     - echo "Application successfully deployed."
   after_script:
     - >
